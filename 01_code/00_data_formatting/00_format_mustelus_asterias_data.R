@@ -8,31 +8,75 @@ library(plotly)
 library(jsonlite)
 
 #### SETUP WORKSPACE ####
-setwd('../')
-
+setwd('C:/Users/lotte/HiDrive/Work/Research_stays/20240213_Ifremer_Woillez_geolocation_modelling/github/')
+getwd()
 # setwd('C:/Users/lotte.pohl/HiDrive/Work/Research_stays/20240213_Ifremer_Woillez_geolocation_modelling/')
 
 # colnames <- c("ADST DATA LOG", "1.0.0", "AdstConverter-1.0.5", "...4", "...5", "...6", "...7", "...8", "...9", "...10", "...11")
-data_mustelus_path <- paste0(getwd(), '/github/00_data/data_mustelus_asterias_raw/')
+data_mustelus_path <- paste0(getwd(), '/00_data/data_mustelus_asterias_raw/')
 
-#### 0. death dates ####
-death_dates <- tibble(
+#### 0. load files ####
+###### death dates #####
+death_dates <- tibble( #visually inspect depthlogs
   tag_serial_number = c("1293295", "1293319", "1293322", "1293304", "1293310", "1293312", "1293308", "1293321"),
   death_date = c("2018-08-20 01:00:00", "2018-08-08 01:00:00", "2018-08-08 01:00:00", "2019-07-21 01:00:00", "2019-08-13 01:00:00", "2019-08-07 01:00:00", "2019-08-03 01:00:00", "2019-11-15 01:00:00"))
+###### acoustic_tag_ids #####
+tags <- readr::read_csv(paste0(data_mustelus_path, 'acoustic_detections/tags.csv'), show_col_types = FALSE)
+###### animals #####
+animals <- readr::read_csv(paste0(data_mustelus_path, 'acoustic_detections/animals.csv'), show_col_types = FALSE) %>%
+  dplyr::mutate(acoustic_tag_id = gsub(",.*","", acoustic_tag_id)) # get rid of double acoustic_tag_id per column
+###### tracks ######
+mustelus_all_tracks <- readr::read_csv(paste0(data_mustelus_path, 'mustelus_asterias_all_geolocation_outputs.csv'), show_col_types = FALSE)
+###### deployments ######
+deployments <- readr::read_csv(paste0(data_mustelus_path, 'acoustic_detections/deployments.csv'), show_col_types = FALSE) %>%
+  dplyr::rename(deploy_time = deploy_date_time, recover_time = recover_date_time, latitude = deploy_latitude, longitude = deploy_longitude)
+###### detections ######
+detections <- 
+  readr::read_csv(paste0(data_mustelus_path, 'acoustic_detections/detections.csv'), show_col_types = FALSE) %>%
+  dplyr::select(deployment_id, date_time, acoustic_tag_id) %>%
+  dplyr::rename(time = date_time)
+
+
 
 
 #### 1. make dst.csv ####
-# load master depth temp log
-mustelus_all_depth_temp <- readr::read_csv(paste0(data_mustelus_path, 'masterias_depth_temp.csv'), show_col_types = FALSE)
-mustelus_all_tracks <- readr::read_csv(paste0(data_mustelus_path, 'mustelus_asterias_all_geolocation_outputs.csv'), show_col_types = FALSE)
 
 make_dst <- function(tag_serial_num){
   # format the file correctly
-  dst <- mustelus_all_depth_temp %>%
-    dplyr::filter(tag_serial_number == tag_serial_num) %>%
-    dplyr::select(date_time, temp_c, depth_m) %>%
-    dplyr::rename(time = date_time, temperature = temp_c, pressure = depth_m)
+  colnames <- c("ADST DATA LOG", "1.0.0", "AdstConverter-1.0.5", "...4", "...5", "...6", "...7", "...8", "...9", "...10", "...11")
+  temperature_log_raw <- readr::read_csv(paste0(data_mustelus_path, 'SN', tag_serial_num, '/SN', tag_serial_num, '_temperature_log.csv'), show_col_types = FALSE, col_names = colnames)
+  # wrangle data log
+  temperature_log <- 
+    temperature_log_raw %>%
+    dplyr::filter(`ADST DATA LOG` == 'TEMPERATURE') %>% 
+    dplyr::select(`ADST DATA LOG`, ...4, ...6) %>%
+    dplyr::filter(!is.na(...4)) %>%
+    tidyr::drop_na() %>% 
+    dplyr::rename(time = ...4, temperature = ...6) %>%
+    dplyr::mutate(time = time %>% lubridate::mdy_hms() %>% format("%Y-%m-%d %H:%M:%S") %>% as.POSIXct(),
+                  temperature = temperature %>% as.numeric(),
+                  time2 = seq(time[1] %>% lubridate::ceiling_date(unit = "minutes"), by = "4 mins", length.out = dplyr::n())) #temp sensor measures every 4 mins
+
+  pressure_log_raw <- readr::read_csv(paste0(data_mustelus_path, 'SN', tag_serial_num, '/SN', tag_serial_num, '_pressure_log.csv'), show_col_types = FALSE, col_names = colnames)
+  # wrangle data log
+  pressure_log <- 
+    pressure_log_raw %>%
+    dplyr::filter(`ADST DATA LOG` == 'PRESSURE') %>% 
+    dplyr::select(`ADST DATA LOG`, ...4, ...6) %>%
+    dplyr::filter(!is.na(...4)) %>%
+    tidyr::drop_na() %>%
+    dplyr::rename(time = ...4, pressure = ...6) %>%
+    dplyr::mutate(time = time %>% lubridate::mdy_hms() %>% format("%Y-%m-%d %H:%M:%S") %>% as.POSIXct(),
+                  pressure = pressure %>% as.numeric(),
+                  time2 = seq(time[1] %>% lubridate::ceiling_date(unit = "minutes"), by = "2 mins", length.out = dplyr::n())) #pressure sensor measures every 2min
   
+  dst <- 
+    temperature_log %>%
+    dplyr::left_join(pressure_log %>% dplyr::select(time2, pressure),
+                     by = 'time2') %>%
+    dplyr::rename(time_old = time, time = time2) %>% 
+    dplyr::select(time, pressure, temperature)
+
   #save csv
   readr::write_csv(dst, file = paste0(getwd(), '/00_data/data_mustelus_asterias_modelling/SN', tag_serial_num, '/dst.csv'))
   return(dst)
@@ -44,83 +88,104 @@ for(tag in death_dates$tag_serial_number){
   assign(paste0('dst_', tag), dst)
 }
 
-mustelus_295_combined_log_raw <- readr::read_csv(paste0(data_mustelus_path, 'SN1293295/SN1293295_combined_log.csv'), show_col_types = FALSE)
-mustelus_295_pressure_log_raw <- readr::read_csv(paste0(data_mustelus_path, 'SN1293295/SN1293295_pressure_log.csv'), show_col_types = FALSE)
-mustelus_295_temperature_log_raw <- readr::read_csv(paste0(data_mustelus_path, 'SN1293295/SN1293295_temperature_log.csv'), show_col_types = FALSE)
+# tests #
 
-mustelus_295_temperature_log <- 
-  mustelus_295_temperature_log_raw %>%
-  dplyr::filter(`ADST DATA LOG` %in% c('PRESSURE', 'TEMPERATURE')) %>% 
+# in master file already wrong
+p <- ggplot(data = dst_1293310, mapping = aes(x = date_time, y = -depth_m)) +
+  geom_line() +
+  theme_bw()
+p %>% plotly::ggplotly()
+
+# in master file already wrong
+p <- ggplot(data = dst_1293312, mapping = aes(x = time, y = temperature)) +
+  geom_line() +
+  theme_bw()
+p %>% plotly::ggplotly()
+
+p <- ggplot(data = dst_1293312, mapping = aes(x = time, y = -pressure)) +
+  geom_line() +
+  theme_bw()
+p %>% plotly::ggplotly()
+
+# mustelus_310_combined_log_raw <- readr::read_csv(paste0(data_mustelus_path, 'SN1293310/SN1293310_combined_log.csv'), show_col_types = FALSE)
+# # wrangle data log
+# mustelus_310_combined_log <- 
+#   mustelus_310_combined_log_raw %>%
+#   dplyr::filter(`ADST DATA LOG` %in% c('PRESSURE', 'TEMPERATURE')) %>% 
+#   dplyr::select(`ADST DATA LOG`, ...4, ...6) %>%
+#   dplyr::filter(!is.na(...4)) %>%
+#   tidyr::pivot_wider(names_from = `ADST DATA LOG`, values_from = ...6) %>%
+#   tidyr::drop_na() %>% #for now: drop NAs, improvement = take lead and lag temp val and set NA temp val to the middle
+#   dplyr::rename(time = ...4, temperature = TEMPERATURE, pressure = PRESSURE) %>%
+#   dplyr::select(time, temperature, pressure) %>%
+#   dplyr::mutate(time = time %>% lubridate::mdy_hms() %>% format("%Y-%m-%d %H:%M:%S") %>% as.POSIXct(),
+#                 temperature = temperature %>% as.numeric(),
+#                 pressure = pressure %>% as.numeric())
+# # export data log as csv
+# readr::write_csv(mustelus_310_combined_log, file = paste0(getwd(), '/00_data/data_mustelus_asterias_modelling/SN1293310/dst.csv'))
+# 
+
+
+# TAG 310
+mustelus_310_temperature_log_raw <- readr::read_csv(paste0(data_mustelus_path, 'SN1293310/SN1293310_temperature_log.csv'), show_col_types = FALSE)
+# wrangle data log
+mustelus_310_temperature_log <- 
+  mustelus_310_temperature_log_raw %>%
+  dplyr::filter(`ADST DATA LOG` == 'TEMPERATURE') %>% 
   dplyr::select(`ADST DATA LOG`, ...4, ...6) %>%
   dplyr::filter(!is.na(...4)) %>%
-  # tidyr::pivot_wider(names_from = `ADST DATA LOG`, values_from = ...6) %>%
+  tidyr::drop_na() %>% #for now: drop NAs, improvement = take lead and lag temp val and set NA temp val to the middle
   dplyr::rename(time = ...4, temperature = ...6) %>%
   dplyr::mutate(time = time %>% lubridate::mdy_hms() %>% format("%Y-%m-%d %H:%M:%S") %>% as.POSIXct(),
-                temperature = temperature %>% as.numeric())
+                temperature = temperature %>% as.numeric(),
+                time2 = seq(time[1] %>% lubridate::ceiling_date(unit = "minutes"), by = "4 mins", length.out = dplyr::n()))
+# export data log as csv
+# readr::write_csv(mustelus_310_combined_log, file = paste0(getwd(), '/00_data/data_mustelus_asterias_modelling/SN1293310/dst.csv'))
 
-mustelus_295_pressure_log <- 
-  mustelus_295_pressure_log_raw %>%
-  dplyr::filter(`ADST DATA LOG` %in% c('PRESSURE', 'TEMPERATURE')) %>% 
+mustelus_310_pressure_log_raw <- readr::read_csv(paste0(data_mustelus_path, 'SN1293310/SN1293310_pressure_log.csv'), show_col_types = FALSE)
+# wrangle data log
+mustelus_310_pressure_log <- 
+  mustelus_310_pressure_log_raw %>%
+  dplyr::filter(`ADST DATA LOG` == 'PRESSURE') %>% 
   dplyr::select(`ADST DATA LOG`, ...4, ...6) %>%
   dplyr::filter(!is.na(...4)) %>%
-  # tidyr::pivot_wider(names_from = `ADST DATA LOG`, values_from = ...6) %>%
+  tidyr::drop_na() %>% #for now: drop NAs, improvement = take lead and lag temp val and set NA temp val to the middle
   dplyr::rename(time = ...4, pressure = ...6) %>%
   dplyr::mutate(time = time %>% lubridate::mdy_hms() %>% format("%Y-%m-%d %H:%M:%S") %>% as.POSIXct(),
-                pressure = pressure %>% as.numeric()) #%>%
-  # dplyr::select(time, pressure)
+                pressure = pressure %>% as.numeric(),
+                time2 = seq(time[1] %>% lubridate::ceiling_date(unit = "minutes"), by = "2 mins", length.out = dplyr::n()))
 
-# wrangle data log
-mustelus_295_combined_log <- 
-  mustelus_295_combined_log_raw %>%
-  dplyr::filter(`ADST DATA LOG` %in% c('PRESSURE', 'TEMPERATURE')) %>% 
-  dplyr::select(`ADST DATA LOG`, ...4, ...6) %>%
-  dplyr::filter(!is.na(...4)) %>%
-  tidyr::pivot_wider(names_from = `ADST DATA LOG`, values_from = ...6) %>%
-  tidyr::drop_na() %>% #for now: drop NAs, improvement = take lead and lag temp val and set NA temp val to the middle
-  dplyr::rename(time = ...4, temperature = TEMPERATURE, pressure = PRESSURE) %>%
-  dplyr::select(time, temperature, pressure) %>%
-  dplyr::mutate(time = time %>% lubridate::mdy_hms() %>% format("%Y-%m-%d %H:%M:%S") %>% as.POSIXct(),
-                temperature = temperature %>% as.numeric(),
-                pressure = pressure %>% as.numeric())
+
 # export data log as csv
-readr::write_csv(mustelus_295_combined_log, file = paste0(getwd(), '/00_data/data_mustelus_asterias_modelling/SN1293295/dst.csv'))
-# quick plot --> for tag 295 this does not look right....:/
+# readr::write_csv(mustelus_310_combined_log, file = paste0(getwd(), '/00_data/data_mustelus_asterias_modelling/SN1293310/dst.csv'))
 
-ggplot(data = mustelus_295_combined_log, mapping = aes(x = time, y = temperature)) +
+dst_310 <- 
+  mustelus_310_temperature_log %>%
+    dplyr::left_join(mustelus_310_pressure_log %>% dplyr::select(time2, pressure),
+                     by = 'time2') %>%
+    dplyr::rename(time_old = time, time = time2) %>%
+    dplyr::select(time, pressure, temperature)
+  
+# in master file already wrong
+p <- ggplot(data = dst_310, mapping = aes(x = time, y = temperature)) +
   geom_line() +
   theme_bw()
+p %>% plotly::ggplotly()
 
-p_t <- 
-  ggplot(data = mustelus_295_temperature_log, mapping = aes(x = time, y = temperature)) +
+p <- ggplot(data = dst_310, mapping = aes(x = time, y = -pressure)) +
   geom_line() +
   theme_bw()
-p_t %>% ggplotly()
+p %>% plotly::ggplotly()
 
-ggplot(data = mustelus_295_combined_log, mapping = aes(x = time, y = -pressure)) +
-  geom_line() +
-  theme_bw()
 
-p_p <- 
-  ggplot(data = mustelus_295_pressure_log, mapping = aes(x = time, y = -pressure)) +
-  geom_line() +
+
+# quick plot #death date 304: 2019-07-23
+p <- ggplot(data = mustelus_304_combined_log, mapping = aes(x = time, y = -pressure)) +
+  geom_point() +
   theme_bw()
-p_p %>% ggplotly()
+p %>% plotly::ggplotly()
+
 #### 2. make acoustic.csv ####
-# get acoustic_tag_ids
-tags <- readr::read_csv(paste0(data_mustelus_path, 'acoustic_detections/tags.csv'), show_col_types = FALSE)
-# # inspect acoustic_tag_ids
-# tags %>% dplyr::select(tag_serial_number, acoustic_tag_id) %>% unique() %>% View() # two acoustic_tag_ids per tag_serial_number because ADST == combination tag
-
-# load detections master file
-detections <- 
-  readr::read_csv(paste0(data_mustelus_path, 'acoustic_detections/detections.csv'), show_col_types = FALSE) %>%
-  dplyr::select(deployment_id, date_time, acoustic_tag_id) %>%
-  dplyr::rename(time = date_time)
-# load deployments master file
-deployments <- 
-  readr::read_csv(paste0(data_mustelus_path, 'acoustic_detections/deployments.csv'), show_col_types = FALSE) %>%
-    dplyr::select(deployment_id, deploy_latitude, deploy_longitude) %>%
-    dplyr::rename(latitude = deploy_latitude, longitude = deploy_longitude)
 
 make_acoustic <- function(tag_serial_num){
   acoustic_tag_ids <- 
@@ -146,9 +211,7 @@ for(tag in death_dates$tag_serial_number){
 }
 
 #### 3. make tagging_events.csv ####
-animals <- readr::read_csv(paste0(data_mustelus_path, 'acoustic_detections/animals.csv'), show_col_types = FALSE) %>%
-  dplyr::mutate(acoustic_tag_id = gsub(",.*","", animals$acoustic_tag_id)) # get rid of double acoustic_tag_id per column
-  
+ 
 make_tagging_events <- function(tag_serial_num){
   acoustic_tag_ids <- 
     tags %>%
@@ -180,9 +243,7 @@ for(tag in death_dates$tag_serial_number){
 }
 
 #### 4. make stations.csv ####
-# load deployments master file
-deployments <- readr::read_csv(paste0(data_mustelus_path, 'acoustic_detections/deployments.csv'), show_col_types = FALSE) %>%
-  dplyr::rename(deploy_time = deploy_date_time, recover_time = recover_date_time)
+# Todo: make stations name unique and nice
 
 make_stations <- function(tag_serial_num){
   acoustic_tag_ids <- 
@@ -326,11 +387,6 @@ mustelus_304_combined_log <-
 # export data log as csv
 readr::write_csv(mustelus_304_combined_log, file = paste0(getwd(), '/00_data/data_mustelus_asterias_modelling/SN1293304/dst.csv'))
 
-# quick plot #death date 304: 2019-07-23
-p <- ggplot(data = mustelus_304_combined_log, mapping = aes(x = time, y = -pressure)) +
-  geom_point() +
-  theme_bw()
-p %>% plotly::ggplotly()
 
 # TAG 308
 mustelus_308_combined_log_raw <- readr::read_csv(paste0(data_mustelus_path, 'SN1293308/SN1293308_combined_log.csv'), show_col_types = FALSE)
