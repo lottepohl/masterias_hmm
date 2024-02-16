@@ -9,10 +9,11 @@ library(jsonlite)
 
 #### SETUP WORKSPACE ####
 setwd('../')
+
 # setwd('C:/Users/lotte.pohl/HiDrive/Work/Research_stays/20240213_Ifremer_Woillez_geolocation_modelling/')
 
 # colnames <- c("ADST DATA LOG", "1.0.0", "AdstConverter-1.0.5", "...4", "...5", "...6", "...7", "...8", "...9", "...10", "...11")
-data_mustelus_path <- paste0(getwd(), '/00_data/data_mustelus_asterias_raw/')
+data_mustelus_path <- paste0(getwd(), '/github/00_data/data_mustelus_asterias_raw/')
 
 #### 0. death dates ####
 death_dates <- tibble(
@@ -52,18 +53,21 @@ mustelus_295_temperature_log <-
   dplyr::filter(`ADST DATA LOG` %in% c('PRESSURE', 'TEMPERATURE')) %>% 
   dplyr::select(`ADST DATA LOG`, ...4, ...6) %>%
   dplyr::filter(!is.na(...4)) %>%
-  tidyr::pivot_wider(names_from = `ADST DATA LOG`, values_from = ...6) %>%
-  dplyr::rename(time = ...4, temperature = TEMPERATURE) %>%
-  dplyr::mutate(time = time %>% lubridate::mdy_hms() %>% format("%Y-%m-%d %H:%M:%S") %>% as.POSIXct())
+  # tidyr::pivot_wider(names_from = `ADST DATA LOG`, values_from = ...6) %>%
+  dplyr::rename(time = ...4, temperature = ...6) %>%
+  dplyr::mutate(time = time %>% lubridate::mdy_hms() %>% format("%Y-%m-%d %H:%M:%S") %>% as.POSIXct(),
+                temperature = temperature %>% as.numeric())
 
 mustelus_295_pressure_log <- 
   mustelus_295_pressure_log_raw %>%
   dplyr::filter(`ADST DATA LOG` %in% c('PRESSURE', 'TEMPERATURE')) %>% 
   dplyr::select(`ADST DATA LOG`, ...4, ...6) %>%
   dplyr::filter(!is.na(...4)) %>%
-  tidyr::pivot_wider(names_from = `ADST DATA LOG`, values_from = ...6) %>%
-  dplyr::rename(time = ...4, pressure = PRESSURE) %>%
-  dplyr::mutate(time = time %>% lubridate::mdy_hms() %>% format("%Y-%m-%d %H:%M:%S") %>% as.POSIXct())
+  # tidyr::pivot_wider(names_from = `ADST DATA LOG`, values_from = ...6) %>%
+  dplyr::rename(time = ...4, pressure = ...6) %>%
+  dplyr::mutate(time = time %>% lubridate::mdy_hms() %>% format("%Y-%m-%d %H:%M:%S") %>% as.POSIXct(),
+                pressure = pressure %>% as.numeric()) #%>%
+  # dplyr::select(time, pressure)
 
 # wrangle data log
 mustelus_295_combined_log <- 
@@ -81,14 +85,26 @@ mustelus_295_combined_log <-
 # export data log as csv
 readr::write_csv(mustelus_295_combined_log, file = paste0(getwd(), '/00_data/data_mustelus_asterias_modelling/SN1293295/dst.csv'))
 # quick plot --> for tag 295 this does not look right....:/
+
 ggplot(data = mustelus_295_combined_log, mapping = aes(x = time, y = temperature)) +
   geom_line() +
   theme_bw()
+
+p_t <- 
+  ggplot(data = mustelus_295_temperature_log, mapping = aes(x = time, y = temperature)) +
+  geom_line() +
+  theme_bw()
+p_t %>% ggplotly()
 
 ggplot(data = mustelus_295_combined_log, mapping = aes(x = time, y = -pressure)) +
   geom_line() +
   theme_bw()
 
+p_p <- 
+  ggplot(data = mustelus_295_pressure_log, mapping = aes(x = time, y = -pressure)) +
+  geom_line() +
+  theme_bw()
+p_p %>% ggplotly()
 #### 2. make acoustic.csv ####
 # get acoustic_tag_ids
 tags <- readr::read_csv(paste0(data_mustelus_path, 'acoustic_detections/tags.csv'), show_col_types = FALSE)
