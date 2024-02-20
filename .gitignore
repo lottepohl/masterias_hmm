@@ -51,3 +51,5 @@ rsconnect/
 # custom 
 00_data/
 02_results_tracks/
+03_results_maps/
+04_results_plots/

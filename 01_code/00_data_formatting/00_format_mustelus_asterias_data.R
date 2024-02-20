@@ -196,7 +196,7 @@ make_acoustic <- function(tag_serial_num){
   acoustic <- 
     detections %>%
       dplyr::filter(acoustic_tag_id %in% acoustic_tag_ids$acoustic_tag_id) %>%
-      dplyr::left_join(deployments, by = join_by(deployment_id)) %>%
+      dplyr::left_join(deployments, by = "deployment_id") %>%
       dplyr::select(time, deployment_id, longitude, latitude)
   
   #save csv
@@ -226,10 +226,14 @@ make_tagging_events <- function(tag_serial_num){
     dplyr::select(event_name, time, longitude, latitude) %>%
     dplyr::add_row(event_name = 'fish_death',
                    time = death_dates %>% dplyr::filter(tag_serial_number == tag_serial_num) %>% dplyr::select(death_date) %>% dplyr::pull() %>% as.POSIXct(format = "%Y-%m-%d %H:%M:%S", tz = "UTC"),
-                   longitude = mustelus_all_tracks %>% dplyr::filter(tag_serial_number == tag_serial_num, date_time == time %>% format("%Y-%m-%d") %>% as.POSIXct(tz = "UTC")) %>%
-                     dplyr::select(detection_longitude_mode) %>% pull(),
-                   latitude = mustelus_all_tracks %>% dplyr::filter(tag_serial_number == tag_serial_num, date_time == time %>% format("%Y-%m-%d") %>% as.POSIXct(tz = "UTC")) %>%
-                     dplyr::select(detection_latitude_mode) %>% pull())
+                   longitude = NA,
+                   latitude = NA)
+    # dplyr::add_row(event_name = 'fish_death',
+    #                time = death_dates %>% dplyr::filter(tag_serial_number == tag_serial_num) %>% dplyr::select(death_date) %>% dplyr::pull() %>% as.POSIXct(format = "%Y-%m-%d %H:%M:%S", tz = "UTC"),
+    #                longitude = mustelus_all_tracks %>% dplyr::filter(tag_serial_number == tag_serial_num, date_time == time %>% format("%Y-%m-%d") %>% as.POSIXct(tz = "UTC")) %>%
+    #                  dplyr::select(detection_longitude_mode) %>% pull(),
+    #                latitude = mustelus_all_tracks %>% dplyr::filter(tag_serial_number == tag_serial_num, date_time == time %>% format("%Y-%m-%d") %>% as.POSIXct(tz = "UTC")) %>%
+    #                  dplyr::select(detection_latitude_mode) %>% pull())
   
   #save csv
   readr::write_csv(tagging_events, file = paste0(getwd(), '/00_data/data_mustelus_asterias_modelling/SN', tag_serial_num, '/tagging_events.csv'))
@@ -261,7 +265,7 @@ make_stations <- function(tag_serial_num){
   stations <-
     deployments %>% 
       dplyr::filter(deployment_id %in% deployment_ids) %>%
-      dplyr::select(deployment_id, station_name, deploy_time, deploy_longitude, deploy_latitude, recover_time, recover_longitude, recover_latitude)
+      dplyr::select(deployment_id, station_name, deploy_time, longitude, latitude, recover_time, recover_longitude, recover_latitude)
   
   #save csv
   readr::write_csv(stations, file = paste0(getwd(), '/00_data/data_mustelus_asterias_modelling/SN', tag_serial_num, '/stations.csv'))
